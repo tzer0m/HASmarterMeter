@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from calendar import monthrange
 
 import aiohttp
 
@@ -103,9 +104,13 @@ class SmarterMeterCoordinator(DataUpdateCoordinator[SmarterMeterData]):
 
         current_reading = float(readings[-1]["value"])
 
+        first_of_this_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        prev_month = first_of_this_month - timedelta(days=1)
+        days_in_prev_month = monthrange(prev_month.year, prev_month.month)[1]
+
         start_24h = now - timedelta(hours=24)
         start_7d = now - timedelta(days=7)
-        start_30d = now - timedelta(days=30)
+        start_30d = now - timedelta(days=days_in_prev_month)
 
         usage_24h = self._calculate_usage(readings, start_24h, now)
         usage_7d = self._calculate_usage(readings, start_7d, now)
