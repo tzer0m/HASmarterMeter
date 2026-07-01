@@ -145,13 +145,24 @@ class SmarterMeterCoordinator(DataUpdateCoordinator[SmarterMeterData]):
     def _calculate_usage(
         self, readings: list[dict[str, Any]], start: datetime, end: datetime
     ) -> float | None:
-        """Return kWh delta between first and last reading within the given window."""
+        """Return kWh delta using the last reading before the window as the baseline."""
         window = [r for r in readings if start <= self._parse_dt(r["capturedAt"]) <= end]
 
-        if len(window) < 2:
+        before = [r for r in readings if self._parse_dt(r["capturedAt"]) < start]
+
+        if not window:
             return None
 
-        return round(float(window[-1]["value"]) - float(window[0]["value"]), 3)
+        last_value = float(window[-1]["value"])
+
+        if before:
+            first_value = float(before[-1]["value"])
+        elif window:
+            first_value = float(window[0]["value"])
+        else:
+            return None
+
+        return round(max(0.0, last_value - first_value), 3)
 
     def _calculate_cost(
         self,
