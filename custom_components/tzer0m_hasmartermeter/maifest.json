@@ -1,0 +1,12 @@
+{
+    "domain": "tzer0m_smartermeter",
+    "name": "HASmarterMeter",
+    "codeowners": ["@tomoddy"],
+    "config_flow": true,
+    "documentation": "https://github.com/tzer0m/HASmarterMeter",
+    "integration_type": "device",
+    "iot_class": "cloud_polling",
+    "issue_tracker": "https://github.com/tzer0m/HASmarterMeter/issues",
+    "requirements": [],
+    "version": "0.1.0"
+  }
