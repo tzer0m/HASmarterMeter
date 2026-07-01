@@ -1,0 +1,22 @@
+{
+    "config": {
+      "step": {
+        "user": {
+          "title": "Connect to HASmarterMeter",
+          "description": "Enter the base URL of your tzer0mApi instance and its API key.",
+          "data": {
+            "host": "API URL",
+            "api_key": "API Key"
+          }
+        }
+      },
+      "error": {
+        "cannot_connect": "Couldn't connect to the API. Check the URL and that it's reachable from Home Assistant.",
+        "invalid_auth": "The API rejected the API key.",
+        "unknown": "Unexpected error occurred."
+      },
+      "abort": {
+        "already_configured": "This SmarterMeter instance is already configured."
+      }
+    }
+  }
