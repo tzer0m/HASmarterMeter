@@ -131,7 +131,11 @@ class SmarterMeterCoordinator(DataUpdateCoordinator[SmarterMeterData]):
     @staticmethod
     def _parse_dt(value: str) -> datetime:
         """Parse an ISO 8601 datetime string to a UTC-aware datetime."""
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        value = value.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(value)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
 
     def _calculate_usage(
         self, readings: list[dict[str, Any]], start: datetime, end: datetime
