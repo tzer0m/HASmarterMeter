@@ -63,6 +63,14 @@ class CurrentReadingSensor(CoordinatorEntity[SmarterMeterCoordinator], SensorEnt
         """Return the latest meter reading."""
         data: SmarterMeterData = self.coordinator.data
         return data.current_reading if data else None
+    
+    @property
+    def extra_state_attributes(self) -> dict[str, str | None]:
+        """Expose the latest reading's capture time as an attribute."""
+        data: SmarterMeterData = self.coordinator.data
+        if data is None:
+            return {}
+        return {"last_captured_at": data.last_captured_at}
 
 
 class UsageSensor(CoordinatorEntity[SmarterMeterCoordinator], SensorEntity):
@@ -132,14 +140,6 @@ class SuccessRateSensor(CoordinatorEntity[SmarterMeterCoordinator], SensorEntity
         super().__init__(coordinator)
         self._attr_unique_id = f"{entry.entry_id}_success_rate"
         self._attr_device_info = _device_info(entry)
-
-    @property
-    def extra_state_attributes(self) -> dict[str, str | None]:
-        """Expose the latest reading's capture time as an attribute."""
-        data: SmarterMeterData = self.coordinator.data
-        if data is None:
-            return {}
-        return {"last_captured_at": data.last_captured_at}
 
     @property
     def native_value(self) -> float | None:
