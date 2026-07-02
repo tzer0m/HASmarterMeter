@@ -6,6 +6,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from calendar import monthrange
+from zoneinfo import ZoneInfo
 
 import aiohttp
 
@@ -99,28 +100,35 @@ class SmarterMeterCoordinator(DataUpdateCoordinator[SmarterMeterData]):
             return SmarterMeterData(None, None, None, None, None, None, None, None)
 
         readings.sort(key=lambda r: r["capturedAt"])
-
-        now = datetime.now(timezone.utc)
-
         current_reading = float(readings[-1]["value"])
 
-        first_of_this_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        UK_TZ = ZoneInfo("Europe/London")
+
+        now_utc = datetime.now(timezone.utc)
+        now_uk = now_utc.astimezone(UK_TZ)
+        today_uk = now_uk.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        start_today = today_uk.astimezone(timezone.utc)
+        end_today = now_utc
+
+        week_start_uk = today_uk - timedelta(days=6)
+        start_7d = week_start_uk.astimezone(timezone.utc)
+
+        first_of_this_month = now_uk.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         prev_month = first_of_this_month - timedelta(days=1)
         days_in_prev_month = monthrange(prev_month.year, prev_month.month)[1]
+        month_start_uk = today_uk - timedelta(days=days_in_prev_month - 1)
+        start_30d = month_start_uk.astimezone(timezone.utc)
 
-        start_24h = now - timedelta(hours=24)
-        start_7d = now - timedelta(days=7)
-        start_30d = now - timedelta(days=days_in_prev_month)
+        usage_24h = self._calculate_usage(readings, start_today, end_today, exclusive_start=False)
+        usage_7d = self._calculate_usage(readings, start_7d, end_today, exclusive_start=True)
+        usage_30d = self._calculate_usage(readings, start_30d, end_today, exclusive_start=True)
 
-        usage_24h = self._calculate_usage(readings, start_24h, now)
-        usage_7d = self._calculate_usage(readings, start_7d, now)
-        usage_30d = self._calculate_usage(readings, start_30d, now)
+        cost_24h = self._calculate_cost(readings, tariffs, start_today, end_today, exclusive_start=False)
+        cost_7d = self._calculate_cost(readings, tariffs, start_7d, end_today, exclusive_start=True)
+        cost_30d = self._calculate_cost(readings, tariffs, start_30d, end_today, exclusive_start=True)
 
-        cost_24h = self._calculate_cost(readings, tariffs, start_24h, now)
-        cost_7d = self._calculate_cost(readings, tariffs, start_7d, now)
-        cost_30d = self._calculate_cost(readings, tariffs, start_30d, now)
-
-        success_rate = self._calculate_success_rate(readings, now)
+        success_rate = self._calculate_success_rate(readings, now_utc)
 
         return SmarterMeterData(
             current_reading=current_reading,
@@ -143,26 +151,18 @@ class SmarterMeterCoordinator(DataUpdateCoordinator[SmarterMeterData]):
         return dt
 
     def _calculate_usage(
-        self, readings: list[dict[str, Any]], start: datetime, end: datetime
+        self, readings: list[dict[str, Any]], start: datetime, end: datetime, exclusive_start: bool = False
     ) -> float | None:
-        """Return kWh delta using the last reading before the window as the baseline."""
-        window = [r for r in readings if start <= self._parse_dt(r["capturedAt"]) <= end]
-
-        before = [r for r in readings if self._parse_dt(r["capturedAt"]) < start]
-
-        if not window:
-            return None
-
-        last_value = float(window[-1]["value"])
-
-        if before:
-            first_value = float(before[-1]["value"])
-        elif window:
-            first_value = float(window[0]["value"])
+        """Return kWh delta between first and last reading within the given window."""
+        if exclusive_start:
+            window = [r for r in readings if self._parse_dt(r["capturedAt"]) > start and self._parse_dt(r["capturedAt"]) <= end]
         else:
+            window = [r for r in readings if start <= self._parse_dt(r["capturedAt"]) <= end]
+
+        if len(window) < 2:
             return None
 
-        return round(max(0.0, last_value - first_value), 3)
+        return round(max(0.0, float(window[-1]["value"]) - float(window[0]["value"])), 3)
 
     def _calculate_cost(
         self,
@@ -170,13 +170,9 @@ class SmarterMeterCoordinator(DataUpdateCoordinator[SmarterMeterData]):
         tariffs: list[dict[str, Any]],
         range_start: datetime,
         range_end: datetime,
+        exclusive_start: bool = False,
     ) -> float | None:
-        """Calculate cost in £ clipping usage and standing charge per tariff period.
-
-        Mirrors the C# CalculateCostForRange logic: for each tariff, clip its date
-        range to the requested range, find readings within that clipped period,
-        compute usage delta and standing charge days, then sum across all tariffs.
-        """
+        """Calculate cost in £ clipping usage and standing charge per tariff period."""
         total_cost = 0.0
         any_tariff_matched = False
 
@@ -194,10 +190,10 @@ class SmarterMeterCoordinator(DataUpdateCoordinator[SmarterMeterData]):
 
             days = (period_end.date() - period_start.date()).days + 1
 
-            period_readings = [
-                r for r in readings
-                if period_start <= self._parse_dt(r["capturedAt"]) <= period_end
-            ]
+            if exclusive_start:
+                period_readings = [r for r in readings if self._parse_dt(r["capturedAt"]) > period_start and self._parse_dt(r["capturedAt"]) <= period_end]
+            else:
+                period_readings = [r for r in readings if period_start <= self._parse_dt(r["capturedAt"]) <= period_end]
 
             usage = 0.0
             if len(period_readings) >= 2:
