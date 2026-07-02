@@ -4,7 +4,7 @@ A Home Assistant custom integration that exposes electricity usage, cost, and ca
 
 ## Requirements
 
-This integration requires the [tzer0mApi](https://github.com/tzer0m/tzer0mApi) to be running and reachable from your Home Assistant instance, with the `/SmarterMeter/Readings` and `/SmarterMeter/Tariffs` endpoints available and an API key configured.
+This integration requires the [tzer0mApi](https://github.com/tzer0m/tzer0mApi) to be running and reachable from your Home Assistant instance, with the `/SmarterMeter/Summary` endpoint available and an API key configured.
 
 ## What it does
 
