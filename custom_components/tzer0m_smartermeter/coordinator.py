@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import Any
-from calendar import monthrange
-from zoneinfo import ZoneInfo
 
 import aiohttp
 
@@ -16,14 +14,11 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
-    API_READINGS_PATH,
-    API_TARIFFS_PATH,
+    API_SUMMARY_PATH,
     CONF_API_KEY,
     CONF_HOST,
     DEFAULT_SCAN_INTERVAL_SECONDS,
     DOMAIN,
-    READINGS_COUNT,
-    SUCCESS_RATE_WINDOW,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -55,7 +50,7 @@ class SmarterMeterData:
 
 
 class SmarterMeterCoordinator(DataUpdateCoordinator[SmarterMeterData]):
-    """Polls the SmarterMeter API and computes usage and cost for each period."""
+    """Polls the SmarterMeter summary endpoint and exposes results as sensor data."""
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Initialise the coordinator with host and API key from the config entry."""
@@ -71,140 +66,30 @@ class SmarterMeterCoordinator(DataUpdateCoordinator[SmarterMeterData]):
         self.Session: aiohttp.ClientSession = async_get_clientsession(hass)
 
     async def _async_update_data(self) -> SmarterMeterData:
-        """Fetch readings and tariffs, then compute all sensor values."""
+        """Fetch the summary from the API and return it as SmarterMeterData."""
         headers = {"X-Api-Key": self.ApiKey}
 
         try:
             async with self.Session.get(
-                f"{self.Host}{API_READINGS_PATH}?count={READINGS_COUNT}",
+                f"{self.Host}{API_SUMMARY_PATH}",
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=10),
             ) as response:
                 if response.status == 401:
                     raise UpdateFailed("SmarterMeter API rejected the configured API key")
                 response.raise_for_status()
-                readings: list[dict[str, Any]] = await response.json()
-
-            async with self.Session.get(
-                f"{self.Host}{API_TARIFFS_PATH}",
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=10),
-            ) as response:
-                response.raise_for_status()
-                tariffs: list[dict[str, Any]] = await response.json()
+                data: dict[str, Any] = await response.json()
 
         except aiohttp.ClientError as err:
             raise UpdateFailed(f"Error communicating with SmarterMeter API: {err}") from err
 
-        if not readings:
-            return SmarterMeterData(None, None, None, None, None, None, None, None)
-
-        readings.sort(key=lambda r: r["capturedAt"])
-        current_reading = float(readings[-1]["value"])
-
-        UK_TZ = ZoneInfo("Europe/London")
-
-        now_utc = datetime.now(timezone.utc)
-        now_uk = now_utc.astimezone(UK_TZ)
-        today_uk = now_uk.replace(hour=0, minute=0, second=0, microsecond=0)
-
-        start_today = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
-        week_start_uk = today_uk - timedelta(days=6)
-        start_7d = week_start_uk.astimezone(timezone.utc)
-        start_30d = now_utc.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=29)
-        end_today = now_utc
-
-        usage_24h = self._calculate_usage(readings, start_today, end_today, exclusive_start=False)
-        usage_7d = self._calculate_usage(readings, start_7d, end_today, exclusive_start=True)
-        usage_30d = self._calculate_usage(readings, start_30d, end_today, exclusive_start=True)
-
-        cost_24h = self._calculate_cost(readings, tariffs, start_today, end_today, exclusive_start=False)
-        cost_7d = self._calculate_cost(readings, tariffs, start_7d, end_today, exclusive_start=True)
-        cost_30d = self._calculate_cost(readings, tariffs, start_30d, end_today, exclusive_start=True)
-
-        success_rate = self._calculate_success_rate(readings, now_utc)
-
         return SmarterMeterData(
-            current_reading=current_reading,
-            usage_24h=usage_24h,
-            cost_24h=cost_24h,
-            usage_7d=usage_7d,
-            cost_7d=cost_7d,
-            usage_30d=usage_30d,
-            cost_30d=cost_30d,
-            success_rate=success_rate,
+            current_reading=data.get("currentReading"),
+            usage_24h=data.get("todayUsage"),
+            cost_24h=data.get("todayCost"),
+            usage_7d=data.get("weekUsage"),
+            cost_7d=data.get("weekCost"),
+            usage_30d=data.get("monthUsage"),
+            cost_30d=data.get("monthCost"),
+            success_rate=data.get("successRate"),
         )
-
-    @staticmethod
-    def _parse_dt(value: str) -> datetime:
-        """Parse an ISO 8601 datetime string to a UTC-aware datetime."""
-        value = value.replace("Z", "+00:00")
-        dt = datetime.fromisoformat(value)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt
-
-    def _calculate_usage(
-        self, readings: list[dict[str, Any]], start: datetime, end: datetime, exclusive_start: bool = False
-    ) -> float | None:
-        """Return kWh delta between first and last reading within the given window."""
-        if exclusive_start:
-            window = [r for r in readings if self._parse_dt(r["capturedAt"]) > start and self._parse_dt(r["capturedAt"]) <= end]
-        else:
-            window = [r for r in readings if start <= self._parse_dt(r["capturedAt"]) <= end]
-
-        if len(window) < 2:
-            return None
-
-        return round(max(0.0, float(window[-1]["value"]) - float(window[0]["value"])), 3)
-
-    def _calculate_cost(
-        self,
-        readings: list[dict[str, Any]],
-        tariffs: list[dict[str, Any]],
-        range_start: datetime,
-        range_end: datetime,
-        exclusive_start: bool = False,
-    ) -> float | None:
-        """Calculate cost in £ clipping usage and standing charge per tariff period."""
-        total_cost = 0.0
-        any_tariff_matched = False
-
-        for tariff in tariffs:
-            tariff_start = self._parse_dt(tariff["startDate"] + "T00:00:00+00:00" if "T" not in tariff["startDate"] else tariff["startDate"])
-            tariff_end = self._parse_dt(tariff["endDate"] + "T23:59:59+00:00" if "T" not in tariff["endDate"] else tariff["endDate"])
-
-            period_start = max(range_start, tariff_start)
-            period_end = min(range_end, tariff_end)
-
-            if period_start > period_end:
-                continue
-
-            any_tariff_matched = True
-
-            days = (period_end.date() - period_start.date()).days + 1
-
-            if exclusive_start:
-                period_readings = [r for r in readings if self._parse_dt(r["capturedAt"]) > period_start and self._parse_dt(r["capturedAt"]) <= period_end]
-            else:
-                period_readings = [r for r in readings if period_start <= self._parse_dt(r["capturedAt"]) <= period_end]
-
-            usage = 0.0
-            if len(period_readings) >= 2:
-                usage = max(0.0, float(period_readings[-1]["value"]) - float(period_readings[0]["value"]))
-
-            total_cost += (usage * tariff["unitRatePence"] + days * tariff["standingChargePence"]) / 100
-
-        if not any_tariff_matched:
-            return None
-
-        return round(total_cost, 2)
-
-    def _calculate_success_rate(self, readings: list[dict[str, Any]], now: datetime) -> float:
-        """Return success rate as a percentage based on readings in the last 200 hours."""
-        window_start = now - timedelta(hours=SUCCESS_RATE_WINDOW * 2)
-        recent = [
-            r for r in readings
-            if self._parse_dt(r["capturedAt"]) >= window_start
-        ]
-        return round(min(len(recent) / SUCCESS_RATE_WINDOW * 100, 100), 1)
