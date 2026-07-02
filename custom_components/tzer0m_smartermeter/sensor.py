@@ -134,6 +134,14 @@ class SuccessRateSensor(CoordinatorEntity[SmarterMeterCoordinator], SensorEntity
         self._attr_device_info = _device_info(entry)
 
     @property
+    def extra_state_attributes(self) -> dict[str, str | None]:
+        """Expose the latest reading's capture time as an attribute."""
+        data: SmarterMeterData = self.coordinator.data
+        if data is None:
+            return {}
+        return {"last_captured_at": data.last_captured_at}
+
+    @property
     def native_value(self) -> float | None:
         """Return the reading success rate as a percentage."""
         data: SmarterMeterData = self.coordinator.data

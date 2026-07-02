@@ -36,6 +36,7 @@ class SmarterMeterData:
         cost_7d: float | None,
         usage_30d: float | None,
         cost_30d: float | None,
+        last_captured_at: str | None,
         success_rate: float | None,
     ) -> None:
         """Initialise SmarterMeterData."""
@@ -46,6 +47,7 @@ class SmarterMeterData:
         self.cost_7d = cost_7d
         self.usage_30d = usage_30d
         self.cost_30d = cost_30d
+        self.last_captured_at = last_captured_at
         self.success_rate = success_rate
 
 
@@ -91,5 +93,6 @@ class SmarterMeterCoordinator(DataUpdateCoordinator[SmarterMeterData]):
             cost_7d=data.get("weekCost"),
             usage_30d=data.get("monthUsage"),
             cost_30d=data.get("monthCost"),
+            last_captured_at=data.get("lastCapturedAt"),
             success_rate=data.get("successRate"),
         )
