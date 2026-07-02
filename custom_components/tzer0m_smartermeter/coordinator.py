@@ -108,17 +108,11 @@ class SmarterMeterCoordinator(DataUpdateCoordinator[SmarterMeterData]):
         now_uk = now_utc.astimezone(UK_TZ)
         today_uk = now_uk.replace(hour=0, minute=0, second=0, microsecond=0)
 
-        start_today = today_uk.astimezone(timezone.utc)
-        end_today = now_utc
-
+        start_today = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
         week_start_uk = today_uk - timedelta(days=6)
         start_7d = week_start_uk.astimezone(timezone.utc)
-
-        first_of_this_month = now_uk.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        prev_month = first_of_this_month - timedelta(days=1)
-        days_in_prev_month = monthrange(prev_month.year, prev_month.month)[1]
-        month_start_uk = today_uk - timedelta(days=days_in_prev_month - 1)
-        start_30d = month_start_uk.astimezone(timezone.utc)
+        start_30d = now_utc.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=29)
+        end_today = now_utc
 
         usage_24h = self._calculate_usage(readings, start_today, end_today, exclusive_start=False)
         usage_7d = self._calculate_usage(readings, start_7d, end_today, exclusive_start=True)
